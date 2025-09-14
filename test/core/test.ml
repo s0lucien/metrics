@@ -21,7 +21,7 @@
 let data_ = Queue.create ()
 let data () = Queue.pop data_
 
-let now =
+let custom_now =
   let n = ref ~-1 in
   fun () ->
     incr n;
@@ -38,7 +38,7 @@ let set_mem_reporter () =
     let timestamp =
       match Metrics.Data.timestamp data with
       | Some ts -> ts
-      | None -> Int64.to_string (now ())
+      | None -> Int64.to_string (custom_now ())
     in
     let d = (name, fields tags, fields data_fields, timestamp) in
     Queue.push d data_;
@@ -46,7 +46,7 @@ let set_mem_reporter () =
     k ()
   in
   let at_exit () = () in
-  Metrics.set_reporter { Metrics.report; now; at_exit }
+  Metrics.set_reporter { Metrics.report; now = custom_now; at_exit }
 
 (*************)
 (*   Tests   *)
@@ -54,27 +54,30 @@ let set_mem_reporter () =
 
 let src =
   let open Metrics in
-  let tags = Tags.[ int "foo"; string "bar" ] in
+  let tags = Tags.[ int "int_tag"; string "string_tag" ] in
   let data i =
-    Data.v [ string "toto" ("XXX" ^ string_of_int i); int "titi" i ]
+    Data.v
+      [
+        string "string_data" ("string_of_" ^ string_of_int i); int "int_data" i;
+      ]
   in
   Src.v "test" ~tags ~data
 
 let f tags =
-  Metrics.add src tags (fun m -> m 42);
-  Metrics.add src tags (fun m -> m 43)
+  Metrics.add src tags (fun m -> m 1);
+  Metrics.add src tags (fun m -> m 2)
 
-let i0 t = t 42 "hi!"
-let i1 t = t 12 "toto"
+let i0 t = t 11 "i0_fun"
+let i1 t = t 22 "i1_fun"
 
 let timer =
   let open Metrics in
-  let tags = Tags.[ string "truc" ] in
+  let tags = Tags.[ string "timer_tag" ] in
   let data (_ : (unit, string) rresult) = Data.v [] in
   Src.v "sleep" ~tags ~data ~duration:true ~status:true
 
-let m1 t = t "foo"
-let m2 t = t "bar"
+let m1 t = t "m1_fun"
+let m2 t = t "m2_fun"
 
 let status =
   let open Metrics in
@@ -98,37 +101,40 @@ let test_f () =
   f i0;
   Alcotest.check d "i0" (data ())
     ( "test",
-      [ ("foo", "42"); ("bar", "hi!") ],
-      [ ("toto", "XXX42"); ("titi", "42") ],
+      [ ("int_tag", "11"); ("string_tag", "i0_fun") ],
+      [ ("string_data", "string_of_1"); ("int_data", "1") ],
       "0" );
   Alcotest.check d "i0" (data ())
     ( "test",
-      [ ("foo", "42"); ("bar", "hi!") ],
-      [ ("toto", "XXX43"); ("titi", "43") ],
+      [ ("int_tag", "11"); ("string_tag", "i0_fun") ],
+      [ ("string_data", "string_of_2"); ("int_data", "2") ],
       "1" );
   f i1;
-  Alcotest.check d "i0" (data ())
+  Alcotest.check d "i1" (data ())
     ( "test",
-      [ ("foo", "12"); ("bar", "toto") ],
-      [ ("toto", "XXX42"); ("titi", "42") ],
+      [ ("int_tag", "22"); ("string_tag", "i1_fun") ],
+      [ ("string_data", "string_of_1"); ("int_data", "1") ],
       "2" );
   Alcotest.check d "i1" (data ())
     ( "test",
-      [ ("foo", "12"); ("bar", "toto") ],
-      [ ("toto", "XXX43"); ("titi", "43") ],
+      [ ("int_tag", "22"); ("string_tag", "i1_fun") ],
+      [ ("string_data", "string_of_2"); ("int_data", "2") ],
       "3" )
 
 let test_timer () =
   let _ = Metrics.rrun timer m1 (fun () -> Ok (Unix.sleep 1)) in
   Alcotest.check d "m1-ok" (data ())
-    ("sleep", [ ("truc", "foo") ], [ ("duration", "1"); ("status", "ok") ], "6");
+    ( "sleep",
+      [ ("timer_tag", "m1_fun") ],
+      [ ("duration", "1"); ("status", "ok") ],
+      "6" );
   let _ =
     try Metrics.rrun timer m1 (fun () -> raise Not_found)
     with Not_found -> Ok ()
   in
   Alcotest.check d "m1-error" (data ())
     ( "sleep",
-      [ ("truc", "foo") ],
+      [ ("timer_tag", "m1_fun") ],
       [ ("duration", "1"); ("status", "error") ],
       "9" )
 
