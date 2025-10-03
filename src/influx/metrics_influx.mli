@@ -14,15 +14,17 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+module Encoder = Encoder
+
 val encode_line_protocol : Metrics.tags -> Metrics.data -> string -> string
 (** [encode_line_protocol tags data name] encodes the [tags] and [data] to the
     {{:https://docs.influxdata.com/influxdb/v1.5/write_protocols/line_protocol_reference/}
      influx line protocol}, using [name] as measurement. *)
 
-val lwt_reporter :
+val async_reporter :
   ?tags:Metrics.tags ->
   ?interval:int ->
-  (string -> unit Lwt.t) ->
+  (string -> unit Async.Deferred.t) ->
   (unit -> int64) ->
   Metrics.reporter
 (** [lwt_reporter ~tags ~interval send clock] is a metrics reporter that encodes

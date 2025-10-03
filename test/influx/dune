@@ -1,0 +1,6 @@
+(library
+ (name test_metrics_influx)
+ (inline_tests)
+ (libraries metrics metrics-influx)
+ (preprocess
+  (pps ppx_jane)))

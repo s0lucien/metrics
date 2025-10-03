@@ -20,155 +20,76 @@
 (* example line: weather,location=us-midwest temperature=82 1465839830100400200 *)
 (*************)
 
-module S = Set.Make (String)
+open Core
+open Async
+module Encoder = Encoder
 
-let avoid_keyword =
-  let keywords =
-    S.of_list
-      [
-        "ALL";
-        "ALTER";
-        "ANY";
-        "AS";
-        "ASC";
-        "BEGIN";
-        "BY";
-        "CREATE";
-        "CONTINUOUS";
-        "DATABASE";
-        "DATABASES";
-        "DEFAULT";
-        "DELETE";
-        "DESC";
-        "DESTINATIONS";
-        "DIAGNOSTICS";
-        "DISTINCT";
-        "DROP";
-        "DURATION";
-        "END";
-        "EVERY";
-        "EXPLAIN";
-        "FIELD";
-        "FOR";
-        "FROM";
-        "GRANT";
-        "GRANTS";
-        "GROUP";
-        "GROUPS";
-        "IN";
-        "INF";
-        "INSERT";
-        "INTO";
-        "KEY";
-        "KEYS";
-        "KILL";
-        "LIMIT";
-        "SHOW";
-        "MEASUREMENT";
-        "MEASUREMENTS";
-        "NAME";
-        "OFFSET";
-        "ON";
-        "ORDER";
-        "PASSWORD";
-        "POLICY";
-        "POLICIES";
-        "PRIVILEGES";
-        "QUERIES";
-        "QUERY";
-        "READ";
-        "REPLICATION";
-        "RESAMPLE";
-        "RETENTION";
-        "REVOKE";
-        "SELECT";
-        "SERIES";
-        "SET";
-        "SHARD";
-        "SHARDS";
-        "SLIMIT";
-        "SOFFSET";
-        "STATS";
-        "SUBSCRIPTION";
-        "SUBSCRIPTIONS";
-        "TAG";
-        "TO";
-        "USER";
-        "USERS";
-        "VALUES";
-        "WHERE";
-        "WITH";
-        "WRITE";
-      ]
-  in
-  fun m -> if S.mem (String.uppercase_ascii m) keywords then "o" ^ m else m
-
-let escape =
-  List.fold_right (fun e m' ->
-      String.concat ("\\" ^ Char.escaped e) (String.split_on_char e m'))
-
-let escape_measurement m = escape [ ','; ' ' ] (avoid_keyword m)
-let escape_name m = escape [ ','; ' '; '=' ] (avoid_keyword m)
-
-let pp_value (str : string Fmt.t) ppf f =
-  let open Metrics in
-  match value f with
-  | V (String, s) -> str ppf s
-  | V (Int, i) -> Fmt.pf ppf "%di" i
-  | V (Int32, i32) -> Fmt.pf ppf "%ldi" i32
-  | V (Int64, i64) -> Fmt.pf ppf "%Ldi" i64
-  | V (Uint, u) -> Fmt.pf ppf "%ui" u
-  | V (Uint32, u32) -> Fmt.pf ppf "%lui" u32
-  | V (Uint64, u64) -> Fmt.pf ppf "%Lui" u64
-  | _ -> pp_value ppf f
-
-(* we need to:
-   - avoid keywords
-   - escape comma and space in measurement name
-   - escape comma, space and equal in tag key, tag value, field key of type string
-   - double-quote field value of type string
-   - data type number is a float, suffix i for integers *)
 let encode_line_protocol tags data name =
-  let data_fields = Metrics.Data.fields data in
-  let pp_field_str ppf s = Fmt.pf ppf "%S" s in
-  let pp_field ppf f =
-    Fmt.(pair ~sep:(any "=") string (pp_value pp_field_str))
-      ppf
-      (escape_name (Metrics.key f), f)
+  let metrics_fields = Metrics.Data.fields data in
+  let timestamp = Option.map (Metrics.Data.timestamp data) ~f:Int64.of_string in
+  let fields =
+    List.map metrics_fields ~f:(fun (f : Metrics.field) ->
+        let name = Metrics.key f in
+        match Metrics.value f with
+        | V (String, v) -> Encoder.Field.string ~name v
+        | V (Bool, v) -> Encoder.Field.bool ~name v
+        | V (Float, v) -> Encoder.Field.float ~name v
+        | V (Int, v) -> Encoder.Field.int ~name v
+        | V (Int32, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string Fmt.int32 v ^ "i")
+        | V (Int64, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string Fmt.int64 v ^ "i")
+        | V (Uint, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string Fmt.uint v ^ "u")
+        | V (Uint32, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string Fmt.uint32 v ^ "u")
+        | V (Uint64, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string Fmt.uint64 v ^ "u")
+        | V (Other fmt, v) ->
+          Encoder.Field.string ~name (Fmt.to_to_string fmt v))
   in
-  let pp_fields = Fmt.(list ~sep:(any ",") pp_field) in
-  let pp_tag_str ppf s = Fmt.string ppf (escape_name s) in
-  let pp_tag ppf f =
-    Fmt.(pair ~sep:(any "=") string (pp_value pp_tag_str))
-      ppf
-      (escape_name (Metrics.key f), f)
+  let tags =
+    List.map
+      (tags : Metrics.tags)
+      ~f:(fun (f : Metrics.field) ->
+        let name = Metrics.key f in
+        match Metrics.value f with
+        | V (Other fmt, v) -> (name, Fmt.to_to_string fmt v)
+        | V (String, v) -> (name, v)
+        | V (Bool, v) -> (name, Fmt.to_to_string Fmt.bool v)
+        | V (Float, v) -> (name, Fmt.to_to_string Fmt.float v)
+        | V (Int, v) -> (name, Fmt.to_to_string Fmt.int v)
+        | V (Int32, v) -> (name, Fmt.to_to_string Fmt.int32 v)
+        | V (Int64, v) -> (name, Fmt.to_to_string Fmt.int64 v)
+        | V (Uint, v) -> (name, Fmt.to_to_string Fmt.uint v)
+        | V (Uint32, v) -> (name, Fmt.to_to_string Fmt.uint32 v)
+        | V (Uint64, v) -> (name, Fmt.to_to_string Fmt.uint64 v))
   in
-  let pp_tags = Fmt.(list ~sep:(any ",") pp_tag) in
-  Fmt.str "%s,%a %a\n" (escape_measurement name) pp_tags tags pp_fields
-    data_fields
+  let encoder = Encoder.Point.create ~tags ~timestamp ~fields name in
+  Encoder.Point.to_line encoder
 
-module SM = Map.Make (Metrics.Src)
-
-let lwt_reporter ?tags:(more_tags = []) ?interval send now =
-  let m = ref SM.empty in
+let async_reporter ?tags:(more_tags = []) ?interval send now =
+  let m = ref Map.Poly.empty in
   let i = match interval with None -> 0L | Some s -> Duration.of_ms s in
   let report ~tags ~data ~over src k =
     let send () =
-      m := SM.add src (now ()) !m;
+      m := Map.Poly.set !m ~key:src ~data:(now ());
       let str =
         encode_line_protocol (more_tags @ tags) data (Metrics.Src.name src)
       in
       let unblock () =
         over ();
-        Lwt.return_unit
+        Deferred.unit
       in
-      Lwt.finalize (fun () -> send str) unblock |> Lwt.ignore_result;
+      don't_wait_for
+        (Monitor.protect ~finally:(fun () -> unblock ()) (fun () -> send str));
+
       k ()
     in
-    match SM.find_opt src !m with
+    match Map.Poly.find !m src with
     | None -> send ()
     | Some last ->
-      if now () > Int64.add last i then send ()
+      if Int64.(now () > last + i) then send ()
       else (
         over ();
         k ())
