@@ -53,7 +53,12 @@ let%expect_test "Point.to_line" =
         {
           name = "count";
           tags = [ ("tag1", "val1"); ("tag2", "val2") ];
-          fields = [ ("value", Int 100); ("bool", Bool true) ];
+          fields =
+            [
+              ("value", Int 100);
+              ("bool", Bool true);
+              ("integer float", Float 100.);
+            ];
           timestamp = Some 1529349109966270847L;
         };
       to_line
@@ -79,7 +84,7 @@ let%expect_test "Point.to_line" =
   [%expect
     {|
     count,tag1=val1,tag2=val2 value=100i,bool=t,float=1.23,int=123i,string="string\with"quote" 1529349109966270847
-    count,tag1=val1,tag2=val2 value=100i,bool=t 1529349109
+    count,tag1=val1,tag2=val2 value=100i,bool=t,integer float=100 1529349109
     count\,with\ space\ and\ comma,tag1_with\,comma\ and\ \=equal\ and\ space=val1,tag2=val2 value,comma=100i,bool=t
     count value with space=100i,bool=t
     |}]

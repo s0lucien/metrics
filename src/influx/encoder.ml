@@ -84,7 +84,7 @@ module Field = struct
   type t = field_key * field_value
 
   let v_to_string = function
-    | Float f -> Float.to_string f
+    | Float f -> String.rstrip ~drop:(Char.equal '.') (Float.to_string f)
     | Int i -> Printf.sprintf "%ii" i
     (* missing UInt64 *)
     | String s -> Printf.sprintf "\"%s\"" s
